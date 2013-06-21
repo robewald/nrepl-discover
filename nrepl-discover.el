@@ -36,9 +36,10 @@
 (defun nrepl-discover-op-handler (buffer)
   (lexical-let ((buffer buffer))
     (lambda (response)
+      (message (format "discover-op-handler: %s" response))
       (nrepl-dbind-response response (message ns out err status id ex root-ex
                                               session overlay clear-overlays
-                                              text url)
+                                              text url position)
         (when message
           (message message))
         (when text ; TODO: test
@@ -52,7 +53,17 @@
         (when err
           (nrepl-emit-output buffer err t))
         (when url
+	  (message (format "browsing url: %s" url))
           (browse-url url))
+	(when position
+	  (message (format "finding position: %s" position))
+	  (destructuring-bind
+	      (path line) (split-string position ":")
+	    (message (format "path: %s line: %s" path line))
+	    (when (and path (file-exists-p path))
+	      (find-file path)
+	      (goto-char (point-min))
+	      (forward-line (1- (string-to-number line))))))
         ;; TODO: support position
         ;; (with-current-buffer buffer
         ;;   (ring-insert find-tag-marker-ring (point-marker)))

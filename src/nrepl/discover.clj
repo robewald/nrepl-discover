@@ -4,7 +4,9 @@
             [clojure.tools.trace :as trace]
             [clojure.test :as test]
             [clojure.walk :as w]
-            [clojure.repl :as repl]))
+            [clojure.repl :as repl]
+            [clojure.java.javadoc :as javadoc]
+            [clojure.java.io :as io]))
 
 (declare discover)
 
@@ -127,10 +129,10 @@
 
 ;; TODO: next/prev failure? (might need hard-coding)
 
-(defn ^{:nrepl/op {:name "doc-bob"
+(defn ^{:nrepl/op {:name "ds-doc"
                    :args [["var" "var" "Doc: "]]
                    :doc "Display the doc of the given var."}}
-  doc-bob
+  ds-doc
   [{:keys [transport var] :as msg}]
   (try
     (when-let [response (with-out-str (repl/doc var))]
@@ -141,3 +143,81 @@
       (t/send transport (m/response-for msg
                                         :statue #{:error :done}
                                         :message (.getMessage e))))))
+
+(defn ^{:nrepl/op {:name "ds-javadoc"
+                   :args [["symbol-name" "string" "Javadoc:"]]
+                   :doc "Display the javadoc of the given var."}}
+  ds-javadoc
+  [{:keys [transport symbol-name ns] :as msg}]
+  (try
+    (let [class-fq-name (ns-resolve (find-ns (symbol ns))
+                                    (symbol symbol-name))
+          url (#'javadoc/javadoc-url (.getName class-fq-name))]
+      (when url
+        (t/send transport (m/response-for msg
+                                          :status :done
+                                          :url url))))
+    (catch Exception e
+      (t/send transport (m/response-for msg
+                                        :status #{:error :done}
+                                        :message (.getMessage e))))))
+
+(defn ^{:nrepl/op {:name "ds-src"
+                   :args [["symbol-name" "string" "Symbol:"]]
+                   :doc "Display the source of the given symbol."}}
+  ds-src
+  [{:keys [transport symbol-name ns] :as msg}]
+  (try
+    (let [sym (ns-resolve (find-ns (symbol ns))
+                                     (symbol symbol-name))]
+      (t/send transport (m/response-for msg
+                                       :status :done
+                                       :text (clojure.repl/source sym))))
+    (catch Exception e
+      (t/send transport (m/response-for msg
+                                        :status #{:error :done}
+                                        :message (.getMessage e))))))
+
+(defn ^{:nrepl/op {:name "ds-locate"
+                   :args [["var-name" "var" "Var:"]]
+                   :doc "Locate of the source of the var."}}
+  ds-locate
+  [{:keys [transport var ns] :as msg}]
+  (clojure.pprint/pprint msg)
+  (try
+    (let [ns-symbol    (symbol ns)
+          ns-var       (symbol var)
+          ns-file      (comp :file meta second first ns-publics)
+          resource-str (comp str io/resource ns-file)
+          file-str     (comp str io/file ns-file)]
+      (cond ((ns-aliases ns-symbol) ns-var)
+            (let [resolved-ns ((ns-aliases ns-symbol) ns-var)]
+              (println "first: " resolved-ns)
+              (t/send transport
+                      (m/response-for msg
+                                      :status :done
+                                      :position (str
+                                                 (file-str resolved-ns)
+                                                 ":1"))))
+            (find-ns ns-var)
+            (do
+              (println "second: " ns-var)
+              (t/send transport
+                      (m/response-for msg
+                                     :status :done
+                                     :position (str
+                                                (file-str file-str ns-var)
+                                                ":1"))))
+
+            (ns-resolve ns-symbol ns-var)
+            (let [position (apply str
+                                  ((juxt
+                                    (comp str io/file :file)
+                                    (fn [_] ":")
+                                    :line)
+                                   (meta (ns-resolve ns-symbol ns-var))))]
+              (println "third. ")
+              (t/send transport
+                      (m/response-for msg
+                                      :status :done
+                                      :position position)))))))
