@@ -3,7 +3,8 @@
             [clojure.tools.nrepl.misc :as m]
             [clojure.tools.trace :as trace]
             [clojure.test :as test]
-            [clojure.walk :as w]))
+            [clojure.walk :as w]
+            [clojure.repl :as repl]))
 
 (declare discover)
 
@@ -125,3 +126,18 @@
                                         :message (.getMessage e))))))
 
 ;; TODO: next/prev failure? (might need hard-coding)
+
+(defn ^{:nrepl/op {:name "doc-bob"
+                   :args [["var" "var" "Doc: "]]
+                   :doc "Display the doc of the given var."}}
+  doc-bob
+  [{:keys [transport var] :as msg}]
+  (try
+    (when-let [response (with-out-str (repl/doc var))]
+      (t/send transport (m/response-for msg
+                                        :status :done
+                                        :text (str response))))
+    (catch Exception e
+      (t/send transport (m/response-for msg
+                                        :statue #{:error :done}
+                                        :message (.getMessage e))))))
